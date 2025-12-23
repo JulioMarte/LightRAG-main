@@ -1,4 +1,4 @@
 lightrag-hku[api]
-neo4j
-redis
-psycopg2-binary
+neo4j>=5.0.0
+redis>=5.0.0
+psycopg2-binary>=2.9.9
