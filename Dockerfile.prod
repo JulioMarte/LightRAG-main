@@ -1,0 +1,23 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Instalar dependencias del sistema para Postgres y herramientas de red
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copiar requerimientos e instalar
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copiar el resto del código
+COPY . .
+
+# Exponer el puerto
+EXPOSE 9621
+
+# Comando de arranque (usando variables de entorno directamente)
+CMD ["python", "-m", "lightrag.api.lightrag_server", "--host", "0.0.0.0", "--port", "9621"]

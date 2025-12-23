@@ -1,0 +1,4 @@
+lightrag-hku[api]
+neo4j
+redis
+psycopg2-binary
