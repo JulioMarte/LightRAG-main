@@ -3,50 +3,69 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.prod
-    container_name: lightrag_prod
-    ports:
-      - "9621:9621"
-    environment:
-      - KV_STORAGE_TYPE=RedisKVStorage
-      - VECTOR_STORAGE_TYPE=PGVectorStorage
-      - GRAPH_STORAGE_TYPE=Neo4jStorage
-      - DOC_STATUS_STORAGE_TYPE=RedisDocStatusStorage
-      - LLM_BINDING=openai
-      - EMBEDDING_BINDING=openai
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - REDIS_URL=redis://redis:6379/0
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - POSTGRES_DB=lightrag
-      - NEO4J_URI=bolt://neo4j:7687
-      - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-password}
-    depends_on:
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-      neo4j:
-        condition: service_healthy
-    volumes:
-      - ./rag_storage:/app/rag_storage
+    container_name: lightrag_app
     restart: unless-stopped
+    ports:
+      - '9621:9621'
+    depends_on:
+      - postgres
+      - neo4j
+      - redis
+    # ESTO ES LO QUE ASEGURA EL ÉXITO EN PRODUCCIÓN
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        cat <<EOF > .env
+        WORKING_DIR=/app/data
+        # Motores de búsqueda
+        KV_STORAGE=RedisKVStorage
+        VECTOR_STORAGE=PGVectorStorage
+        GRAPH_STORAGE=Neo4jStorage
+        DOC_STATUS_STORAGE=RedisDocStatusStorage
+        
+        # Conexiones DB
+        POSTGRES_HOST=postgres
+        POSTGRES_PORT=5432
+        POSTGRES_USER=${POSTGRES_USER}
+        POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+        POSTGRES_DB=${POSTGRES_DB}
+        
+        NEO4J_URI=bolt://neo4j:7687
+        NEO4J_USERNAME=neo4j
+        NEO4J_PASSWORD=${GRAPH_DB_PASSWORD}
+        
+        REDIS_URI=redis://redis:6379/0
+        
+        # AI Config (Forzamos OpenAI para que no instale Ollama)
+        LLM_BINDING=openai
+        LLM_MODEL=gpt-4o-mini
+        LLM_BINDING_API_KEY=${OPENAI_API_KEY}
+        
+        EMBEDDING_BINDING=openai
+        EMBEDDING_MODEL=text-embedding-3-small
+        EMBEDDING_BINDING_API_KEY=${OPENAI_API_KEY}
+        EMBEDDING_DIM=1536
+        
+        # Seguridad
+        AUTH_ACCOUNTS=${AUTH_ACCOUNTS}
+        TOKEN_SECRET=${TOKEN_SECRET}
+        EOF
+        # Ejecutar con 'yes' automático para confirmar multi-instancia si pregunta
+        echo "yes" | python -m lightrag.api.lightrag_server --host 0.0.0.0 --port 9621
 
   postgres:
     image: pgvector/pgvector:pg16
     container_name: lightrag_postgres
     environment:
-      - POSTGRES_USER=postgres
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - POSTGRES_DB=lightrag
+      - POSTGRES_DB=${POSTGRES_DB:-lightrag}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-lightrag}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -56,7 +75,7 @@ services:
     image: neo4j:5-community
     container_name: lightrag_neo4j
     environment:
-      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-password}
+      - NEO4J_AUTH=neo4j/${GRAPH_DB_PASSWORD:-password}
       - NEO4J_PLUGINS=["apoc"]
     ports:
       - "7474:7474"
@@ -64,7 +83,7 @@ services:
     volumes:
       - neo4j_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:7474 || exit 1"]
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:7474 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
